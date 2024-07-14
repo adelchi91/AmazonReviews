@@ -7,23 +7,23 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, ValidationError, Field
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 from tqdm import tqdm
 from alibi_detect.cd import TabularDrift
 import sys
 import os
+import json
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.helpers import (GroupwiseIsolationForest,
                             GroupwiseLOF, TextOutlierTransformer, 
                             TemporalOutlierDetector, BehavioralOutlierDetector, preprocess_column)
 
-
+# to keep track of df processing
 processed_df = None
-
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -160,12 +160,22 @@ def detect_drift(train_df, test_df):
 # Initialize FastAPI
 app = FastAPI()
 
-# Model for the initial dataframe after loading
+class ImagesMeta(BaseModel):
+    hi_res: List[Optional[str]]
+    large: List[Optional[str]]
+    thumb: List[Optional[str]]
+    variant: List[str]
+
+class Videos(BaseModel):
+    title: List
+    url: List
+    user_id: List
+
 class InitialDataFrame(BaseModel):
     rating: float
     title_review: str
     text: str
-    images_review: Optional[str]
+    images_review: List = []
     asin: str
     parent_asin: str
     user_id: str
@@ -176,17 +186,65 @@ class InitialDataFrame(BaseModel):
     title_meta: str
     average_rating: float
     rating_number: int
-    features: Optional[str]
-    description: str
-    price: str
-    images_meta: Optional[str]
-    videos: Optional[str]
-    store: str
-    categories: str
-    details: Optional[str]
+    features: List = []
+    description: List = []
+    price: Optional[str]
+    images_meta: ImagesMeta
+    videos: Videos
+    store: Optional[str]
+    categories: List = []
+    details: Optional[Dict[str, Any]]  # Change this to Dict
     bought_together: Optional[str]
     subtitle: Optional[str]
     author: Optional[str]
+
+    class Config:
+        extra = "forbid"
+
+    @classmethod
+    def parse_obj(cls, obj):
+        if 'details' in obj and isinstance(obj['details'], str):
+            obj['details'] = json.loads(obj['details'])
+        return super().parse_obj(obj)
+    
+
+# to validate with pydantic model
+def validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    try:
+        data_dict = df.to_dict(orient='records')
+        validated_data = []
+        for row in data_dict:
+            # Handle None values in 'store' field
+            if row['store'] is None:
+                row['store'] = "Unknown"
+            # Convert 'None' string to None
+            if row['price'] == 'None':
+                row['price'] = None
+            
+            # Parse the details JSON string
+            if row['details']:
+                try:
+                    row['details'] = json.loads(row['details'])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in details field: {row['details']}")
+                    row['details'] = None
+            
+            # Handle potential None values in images_meta
+            if 'images_meta' in row:
+                for key in ['hi_res', 'large', 'thumb']:
+                    if key in row['images_meta']:
+                        row['images_meta'][key] = [url if url is not None else '' for url in row['images_meta'][key]]
+            
+            # Validate the row
+            validated_row = InitialDataFrame.parse_obj(row).dict()
+            validated_data.append(validated_row)
+        
+        # Convert back to DataFrame
+        return pd.DataFrame(validated_data)
+    except ValidationError as e:
+        logger.error(f"Data validation error: {e}")
+        raise
+
 
 # Model for the dataframe after outlier detection
 class OutlierDetectedDataFrame(InitialDataFrame):
@@ -227,16 +285,31 @@ class DriftDetectionResponse(BaseModel):
     status: str
 
 # API endpoints
-@app.post("/detect_outliers")
-def detect_outliers_api(request: OutlierDetectionRequest):
+@app.post("/detect_outliers", response_model=OutlierDetectionResponse)
+def detect_outliers_api():
     global processed_df
     try:
-        df = load_data(request.file_path)
-        df = preprocess_data(df)
+        # Hardcode the file path
+        hardcoded_file_path = "data/amazon_reviews_beauty.joblib"
+        
+        # Load and preprocess the data
+        df = load_data(hardcoded_file_path)
+        print('++++++++++++++++++++++++++++++++++++++++')
+        print(df['details'].head())
+        print('++++++++++++++++++++++++++++++++++++++++')
+        # Validate the raw data using the Pydantic model
+        validated_data = validate_dataframe(df)
+        # Preprocess the validated data
+        df = preprocess_data(validated_data)
+        # Perform outlier detection
         df = detect_outliers(df)
         processed_df = df  # Store the processed dataframe
+        
         result = df[['outlier_score', 'is_outlier']].to_dict(orient='records')
-        return {"status": "success", "result": result}
+        return OutlierDetectionResponse(status="success", result=result)
+    except ValidationError as e:
+        logger.error(f"Data validation error: {e}")
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"Error in outlier detection: {str(e)}")
         raise HTTPException(status_code=500, detail="Error in outlier detection")
