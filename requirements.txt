@@ -3,3 +3,6 @@ pandas==2.2.2
 datasets==2.20.0
 joblib==1.4.2
 scikit-learn==1.5.1
+evidently==0.4.31
+seaborn==0.13.2
+alibi-detect==0.12.0
