@@ -8,13 +8,21 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
 import logging
 from tqdm import tqdm
 from alibi_detect.cd import TabularDrift
-from ..src.helpers import (GroupwiseIsolationForest,
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.helpers import (GroupwiseIsolationForest,
                             GroupwiseLOF, TextOutlierTransformer, 
                             TemporalOutlierDetector, BehavioralOutlierDetector, preprocess_column)
 
+
+processed_df = None
 
 
 # Set up logging
@@ -107,15 +115,6 @@ def detect_outliers(df):
 # Drift detection function
 def detect_drift(train_df, test_df):
     logger.info("Performing distribution drift analysis...")
-    # Preprocess the data
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = df[col].apply(preprocess_column)
-
-    # Separate the data into training and test sets
-    train_df = df[df['is_outlier'] == 0]
-    test_df = df[df['is_outlier'] == 1]
-
     # Select features for drift analysis
     numerical_features = ['rating', 'helpful_vote', 'verified_purchase', 'price', 'average_rating', 'rating_number']
     categorical_features = ['main_category', 'store']
@@ -125,12 +124,6 @@ def detect_drift(train_df, test_df):
     numerical_features = [col for col in numerical_features if col in train_df.columns and col in test_df.columns]
     categorical_features = [col for col in categorical_features if col in train_df.columns and col in test_df.columns]
     text_features = [col for col in text_features if col in train_df.columns and col in test_df.columns]
-
-    # Create column mapping
-    column_mapping = ColumnMapping()
-    column_mapping.numerical_features = numerical_features
-    column_mapping.categorical_features = categorical_features
-    column_mapping.text_features = text_features
 
     # Use only numerical features for the drift detection
     train_data = train_df[numerical_features].values
@@ -152,7 +145,7 @@ def detect_drift(train_df, test_df):
         # Get p-values
         p_vals = preds['data']['p_val']
         # Define a threshold for significance
-        threshold = 0.0005
+        threshold = 0.05
         # Mark observations in the test set as having drifted if their p-value is below the threshold
         return np.any(p_vals < threshold).astype(int)
 
@@ -167,6 +160,50 @@ def detect_drift(train_df, test_df):
 # Initialize FastAPI
 app = FastAPI()
 
+# Model for the initial dataframe after loading
+class InitialDataFrame(BaseModel):
+    rating: float
+    title_review: str
+    text: str
+    images_review: Optional[str]
+    asin: str
+    parent_asin: str
+    user_id: str
+    timestamp: int
+    helpful_vote: int
+    verified_purchase: bool
+    main_category: str
+    title_meta: str
+    average_rating: float
+    rating_number: int
+    features: Optional[str]
+    description: str
+    price: str
+    images_meta: Optional[str]
+    videos: Optional[str]
+    store: str
+    categories: str
+    details: Optional[str]
+    bought_together: Optional[str]
+    subtitle: Optional[str]
+    author: Optional[str]
+
+# Model for the dataframe after outlier detection
+class OutlierDetectedDataFrame(InitialDataFrame):
+    combined_text_review: str
+    combined_text_product: str
+    isolation_forest_outlier: int
+    lof_outlier: int
+    text_outlier: int
+    temporal_outlier: int
+    high_frequency_outlier: int
+    rating_deviation_outlier: int
+    outlier_score: int
+    is_outlier: int
+    timestamp: datetime  # Note: This field is changed to datetime
+    verified_purchase: int  # Note: This field is changed to int
+    price: float  # Note: This field is changed to float
+
 # API request models
 class OutlierDetectionRequest(BaseModel):
     file_path: str
@@ -175,13 +212,29 @@ class DriftDetectionRequest(BaseModel):
     train_file_path: str
     test_file_path: str
 
+# Model for a single row of the outlier detection result
+class OutlierDetectionResult(BaseModel):
+    outlier_score: int
+    is_outlier: int
+
+# Model for the response of the outlier detection API
+class OutlierDetectionResponse(BaseModel):
+    status: str
+    result: List[OutlierDetectionResult]
+
+# Model for the response of the drift detection API
+class DriftDetectionResponse(BaseModel):
+    status: str
+
 # API endpoints
 @app.post("/detect_outliers")
 def detect_outliers_api(request: OutlierDetectionRequest):
+    global processed_df
     try:
         df = load_data(request.file_path)
         df = preprocess_data(df)
         df = detect_outliers(df)
+        processed_df = df  # Store the processed dataframe
         result = df[['outlier_score', 'is_outlier']].to_dict(orient='records')
         return {"status": "success", "result": result}
     except Exception as e:
@@ -190,21 +243,27 @@ def detect_outliers_api(request: OutlierDetectionRequest):
 
 @app.post("/detect_drift")
 def detect_drift_api(request: DriftDetectionRequest):
+    global processed_df
     try:
-        train_df = load_data(request.train_file_path)
-        test_df = load_data(request.test_file_path)
+        if processed_df is None:
+            raise HTTPException(status_code=400, detail="Please run outlier detection first")
+
+        df = processed_df.copy()  # Use the stored dataframe
+        
+        # Preprocess the data
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].apply(preprocess_column)
+
+        # Separate the data into training and test sets
+        train_df = df[df['is_outlier'] == 0]
+        test_df = df[df['is_outlier'] == 1]
         detect_drift(train_df, test_df)
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error in drift detection: {str(e)}")
         raise HTTPException(status_code=500, detail="Error in drift detection")
 
-# Visualizations endpoint (optional)
-@app.get("/visualizations")
-def get_visualizations():
-    # Implement logic to return visualizations as files or image data
-    # Ensure appropriate handling of visualizations as per FastAPI documentation
-    pass
 
 # Main function to run the FastAPI server
 if __name__ == "__main__":
