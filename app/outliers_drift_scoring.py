@@ -294,9 +294,6 @@ def detect_outliers_api():
         
         # Load and preprocess the data
         df = load_data(hardcoded_file_path)
-        print('++++++++++++++++++++++++++++++++++++++++')
-        print(df['details'].head())
-        print('++++++++++++++++++++++++++++++++++++++++')
         # Validate the raw data using the Pydantic model
         validated_data = validate_dataframe(df)
         # Preprocess the validated data
