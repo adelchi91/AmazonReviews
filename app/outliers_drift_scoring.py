@@ -156,6 +156,7 @@ def detect_drift(train_df, test_df):
     test_df['has_drifted_empirical'] = np.where(test_df['drift_score'] > threshold, 1, 0)
 
     logger.info("Distribution drift analysis complete.")
+    return test_df
 
 # Initialize FastAPI
 app = FastAPI()
@@ -266,9 +267,18 @@ class OutlierDetectedDataFrame(InitialDataFrame):
 class OutlierDetectionRequest(BaseModel):
     file_path: str
 
-class DriftDetectionRequest(BaseModel):
-    train_file_path: str
-    test_file_path: str
+#class DriftDetectionRequest(BaseModel):
+#    train_file_path: str
+#    test_file_path: str
+
+class DriftDetectionResult(BaseModel):
+    drift_score: float
+    has_drifted: int
+    has_drifted_empirical: int
+
+class DriftDetectionResponse(BaseModel):
+    status: str
+    result: List[DriftDetectionResult]
 
 # Model for a single row of the outlier detection result
 class OutlierDetectionResult(BaseModel):
@@ -283,6 +293,9 @@ class OutlierDetectionResponse(BaseModel):
 # Model for the response of the drift detection API
 class DriftDetectionResponse(BaseModel):
     status: str
+    drift_scores: List[float]
+    has_drifted: List[int]
+    has_drifted_empirical: List[int]
 
 # API endpoints
 @app.post("/detect_outliers", response_model=OutlierDetectionResponse)
@@ -311,8 +324,8 @@ def detect_outliers_api():
         logger.error(f"Error in outlier detection: {str(e)}")
         raise HTTPException(status_code=500, detail="Error in outlier detection")
 
-@app.post("/detect_drift")
-def detect_drift_api(request: DriftDetectionRequest):
+@app.post("/detect_drift", response_model=DriftDetectionResponse)
+def detect_drift_api():
     global processed_df
     try:
         if processed_df is None:
@@ -328,8 +341,19 @@ def detect_drift_api(request: DriftDetectionRequest):
         # Separate the data into training and test sets
         train_df = df[df['is_outlier'] == 0]
         test_df = df[df['is_outlier'] == 1]
-        detect_drift(train_df, test_df)
-        return {"status": "success"}
+        test_df = detect_drift(train_df, test_df)
+        
+        # Extract the required columns
+        drift_scores = test_df['drift_score'].tolist()
+        has_drifted = test_df['has_drifted'].tolist()
+        has_drifted_empirical = test_df['has_drifted_empirical'].tolist()
+        
+        return DriftDetectionResponse(
+            status="success",
+            drift_scores=drift_scores,
+            has_drifted=has_drifted,
+            has_drifted_empirical=has_drifted_empirical
+        )
     except Exception as e:
         logger.error(f"Error in drift detection: {str(e)}")
         raise HTTPException(status_code=500, detail="Error in drift detection")
