@@ -85,9 +85,11 @@ def detect_drift_api():
         raise HTTPException(status_code=500, detail="Error in drift detection")
 
 
+# Uncomment following lines, if you want to test your app locally
+
 # Main function to run the FastAPI server
-if __name__ == "__main__":
-    import uvicorn
-    
-    # Run FastAPI server using uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+#if __name__ == "__main__":
+#    import uvicorn
+#    
+#    # Run FastAPI server using uvicorn
+#    uvicorn.run(app, host="0.0.0.0", port=8000)
