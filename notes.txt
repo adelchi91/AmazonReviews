@@ -1,0 +1,8 @@
+TODO:
+
+1. Add another text based outlier detection method 
+2. Comment your notebook and graphics
+3. Add table with top 10 outliers so that you can look at them in the dataframe
+4. Explain that your sampling at the beginning is wrong
+5. In README add how to create a venv
+6. Create a private GitHub repository for your project
