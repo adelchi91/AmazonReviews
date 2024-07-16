@@ -67,7 +67,7 @@ def detect_drift_api():
         # Separate the data into training and test sets
         train_df = df[df['is_outlier'] == 0]
         test_df = df[df['is_outlier'] == 1]
-        test_df = detect_drift(train_df, test_df)
+        test_df, train_df = detect_drift(train_df, test_df)
         
         # Extract the required columns
         drift_scores = test_df['drift_score'].tolist()

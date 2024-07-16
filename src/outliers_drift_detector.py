@@ -142,9 +142,11 @@ def detect_drift(train_df, test_df):
 
     # Calculate drift score for each row in the test dataset
     test_df['drift_score'] = test_df[numerical_features].apply(lambda row: calculate_drift_score(row.values, cd), axis=1)
+    train_df['drift_score'] = train_df[numerical_features].apply(lambda row: calculate_drift_score(row.values, cd), axis=1)
+
     test_df['has_drifted'] = test_df[numerical_features].apply(lambda row: calculte_has_drifred(row.values, cd), axis=1)
     threshold = 0.5
     test_df['has_drifted_empirical'] = np.where(test_df['drift_score'] > threshold, 1, 0)
 
     logger.info("Distribution drift analysis complete.")
-    return test_df
+    return test_df, train_df
