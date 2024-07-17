@@ -105,48 +105,73 @@ def detect_outliers(df):
 
 # Drift detection function
 def detect_drift(train_df, test_df):
-    logger.info("Performing distribution drift analysis...")
+    # logger.info("Performing distribution drift analysis...")
+    
     # Select features for drift analysis
     numerical_features = ['rating', 'helpful_vote', 'verified_purchase', 'price', 'average_rating', 'rating_number']
     categorical_features = ['main_category', 'store']
     text_features = ['combined_text_review', 'combined_text_product']
-
+    
     # Ensure all selected features are present in both datasets
     numerical_features = [col for col in numerical_features if col in train_df.columns and col in test_df.columns]
     categorical_features = [col for col in categorical_features if col in train_df.columns and col in test_df.columns]
     text_features = [col for col in text_features if col in train_df.columns and col in test_df.columns]
-
-    # Use only numerical features for the drift detection
-    train_data = train_df[numerical_features].values
-    test_data = test_df[numerical_features].values
-
-    # Initialize the drift detector
-    cd = TabularDrift(train_data)
-
+    
+    # # TF-IDF Vectorization for text features
+    # tfidf_vectorizers = {}
+    # for text_feature in text_features:
+    #     vectorizer = TfidfVectorizer(max_features=100)  # You can adjust max_features as needed
+    #     train_text_vector = vectorizer.fit_transform(train_df[text_feature].fillna(''))
+    #     test_text_vector = vectorizer.transform(test_df[text_feature].fillna(''))
+        
+    #     # Add vectorized features to dataframes
+    #     feature_names = [f"{text_feature}_{i}" for i in range(train_text_vector.shape[1])]
+    #     train_df = train_df.join(pd.DataFrame(train_text_vector.toarray(), columns=feature_names, index=train_df.index))
+    #     test_df = test_df.join(pd.DataFrame(test_text_vector.toarray(), columns=feature_names, index=test_df.index))
+        
+    #     # Update numerical_features list
+    #     numerical_features.extend(feature_names)
+        
+    #     # Store vectorizer for later use if needed
+    #     tfidf_vectorizers[text_feature] = vectorizer
+    
+    # Combine all features
+    all_features = numerical_features # + categorical_features
+    
+    # Prepare the data
+    train_data = train_df[all_features]
+    test_data = test_df[all_features]
+    
+    # Create categories_per_feature dictionary
+    categories_per_feature = {}
+    for i, feature in enumerate(all_features):
+        if feature in categorical_features:
+            categories_per_feature[i] = None
+    
+    # Initialize the drift detector - KSDrift` will be applied to all features.
+    cd = TabularDrift(
+        train_data.to_numpy(),
+        p_val=.05,
+        #categories_per_feature=categories_per_feature
+    )
+    
     # Function to calculate drift score for each row
     def calculate_drift_score(row, detector):
-        row = row.reshape(1, -1)  # Reshape row for prediction
-        preds = detector.predict(row, drift_type='batch', return_p_val=True, return_distance=True)
-        return preds['data']['distance'][0]
-
-    def calculte_has_drifred(row, detector):
-        row = row.reshape(1, -1)  # Reshape row for prediction
-        # Assuming detector is a TabularDrift instance
-        preds = cd.predict(test_data, drift_type='batch', return_p_val=True)
-        # Get p-values
-        p_vals = preds['data']['p_val']
-        # Define a threshold for significance
-        threshold = 0.05
-        # Mark observations in the test set as having drifted if their p-value is below the threshold
-        return np.any(p_vals < threshold).astype(int)
-
-    # Calculate drift score for each row in the test dataset
-    test_df['drift_score'] = test_df[numerical_features].apply(lambda row: calculate_drift_score(row.values, cd), axis=1)
-    train_df['drift_score'] = train_df[numerical_features].apply(lambda row: calculate_drift_score(row.values, cd), axis=1)
-
-    test_df['has_drifted'] = test_df[numerical_features].apply(lambda row: calculte_has_drifred(row.values, cd), axis=1)
+        row = row.values.reshape(1, -1)  # Reshape row for prediction
+        preds = detector.predict(row, return_p_val=True, return_distance=True)
+        return preds['data']['distance'].mean()  # Average distance across features
+    
+    # Calculate drift score for each row in both datasets
+    test_df['drift_score'] = test_data.apply(lambda row: calculate_drift_score(row, cd), axis=1)
+    train_df['drift_score'] = train_data.apply(lambda row: calculate_drift_score(row, cd), axis=1)
+    
+    # Calculate has_drifted for the entire test set
+    preds = cd.predict(test_data.to_numpy(), return_p_val=True)
+    test_df['has_drifted'] = int(preds['data']['is_drift'])
+    
+    # Calculate empirical drift
     threshold = 0.5
     test_df['has_drifted_empirical'] = np.where(test_df['drift_score'] > threshold, 1, 0)
-
-    logger.info("Distribution drift analysis complete.")
+    
+    # logger.info("Distribution drift analysis complete.")
     return test_df, train_df
