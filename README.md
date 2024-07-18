@@ -1,4 +1,6 @@
-# 1 Outliers detection methodology
+# 1 Outliers detection and drift scores 
+
+## 1.1 Outliers detection methodology
 
 We decided to tackle the outliers detection by taking three types of approaches:
 1. A user experienced/business based approach
@@ -6,9 +8,9 @@ We decided to tackle the outliers detection by taking three types of approaches:
 3. A NLP approach comparing product description and customer reviews text fields 
 
 
-## 1.1 User experienced approach
+### 1.1.1 User experienced approach
 
-### Behavioral Outlier Detector:
+#### Behavioral Outlier Detector:
 
 We've added a `BehavioralOutlierDetector` class that identifies two types of behavioral outliers:
 
@@ -17,25 +19,25 @@ We've added a `BehavioralOutlierDetector` class that identifies two types of beh
 2. Users who consistently give ratings that deviate significantly from the average (rating_deviation_outlier).
 
 
-### High Frequency Outlier Detection:
+#### High Frequency Outlier Detection:
 
 It groups reviews by user and time window (default is daily).
 Users who post more than a threshold number of reviews (default is 5) in a single time window are flagged as high_frequency_outliers.
 
 
-### Rating Deviation Outlier Detection:
+#### Rating Deviation Outlier Detection:
 
 It calculates the average rating for each user and compares it to the overall average rating.
 Users whose average rating deviates from the overall average by more than a threshold (default is 1.5) are flagged as rating_deviation_outliers.
 
 
-### Temporal Outlier Detection:
+#### Temporal Outlier Detection:
 
 We've added a TemporalOutlierDetector class that identifies temporal outliers.
 It groups reviews by a specified time window (default is daily) and flags reviews that occur on days with an unusually high number of reviews (above the 95th percentile).
 
 
-## 1.2 Statistical/ML approach
+### 1.1.2 Statistical/ML approach
 
 A classical methodology would leverage the following:
 
@@ -45,20 +47,20 @@ A classical methodology would leverage the following:
 
 However we decided to drop the Z-score method as it assumes a normal distribution of the data.
 
-### Isolation Forest:
+#### Isolation Forest:
 
 This is an unsupervised learning algorithm that isolates anomalies in the dataset.
 It works well with high-dimensional datasets and doesn't make assumptions about the distribution of the data.
 We apply it to a selection of relevant features, including both numerical and categorical (encoded) data.
 
 
-### Local Outlier Factor (LOF):
+#### Local Outlier Factor (LOF):
 
 LOF is a density-based method that compares the local density of a point to the local densities of its neighbors.
 It's effective at finding outliers in datasets with varying densities.
 Like Isolation Forest, we apply it to a selection of relevant features.
 
-## 1.3 NLP approach 
+### 1.1.3 NLP approach 
 
 We created a class for text outliers in review data based on cosine similarity.
 
@@ -77,7 +79,7 @@ Use topic modeling techniques (e.g., LDA) to identify reviews that don't fit wel
 * Conduct a manual review of the top outliers to understand why they were flagged and to validate the approach.
 
 
-## 1.4 Metrics and Evaluation:
+### 1.1.4 Metrics and Evaluation:
 
 We're using the proportion of samples identified as outliers by each method as a basic metric.
 We also create an 'outlier_score' by summing the results of all three methods, allowing us to rank the samples most likely to be outliers.
@@ -94,6 +96,42 @@ To further improve this analysis we could:
 * Investigate the top outliers manually to understand why they were flagged.
 * Consider the context of the data (e.g., some "outliers" might be legitimate extreme reviews rather than errors).
 
+## 1.2 Drift detection methodology
+
+Our drift detection approach utilizes the Kolmogorov-Smirnov Drift (KSDrift) method implemented through the Alibi Detect library. This methodology aims to identify and quantify distribution shifts between a reference dataset (typically non-outlier data) and a test dataset (potentially containing outliers or drifted data).
+
+### 1.2.1 Process Overview
+
+1. **Feature Selection**: We select relevant numerical, categorical, and text features for drift analysis.
+
+2. **Data Preparation**: The selected features are preprocessed and prepared for the drift detection algorithm.
+
+3. **KSDrift Detector Initialization**: We initialize the TabularDrift detector from Alibi Detect, which applies the KSDrift test to all selected features.
+
+4. **Drift Score Calculation**: For each row in both the reference and test datasets:
+   - We calculate a drift score using the initialized detector.
+   - This score represents the average distance across features, indicating how much the data point differs from the reference distribution.
+
+5. **Global Drift Detection**: We apply the drift detector to the entire test set to determine if there's a significant drift at the dataset level.
+
+6. **Empirical Drift Flagging**: Data points are flagged as "drifted" if their drift score exceeds a predefined threshold.
+
+### 1.2.2 Drift Report Generation
+
+We generate a comprehensive drift report using Evidently AI, which provides:
+- Detailed visualizations of feature distributions
+- Statistical tests for drift detection
+- Insights into which features contribute most to the detected drift
+
+This report offers a holistic view of data drift, enabling data scientists and stakeholders to understand the nature and extent of distribution shifts in the dataset.
+
+### 1.2.3 Interpretation
+
+- Higher drift scores indicate a greater deviation from the reference distribution.
+- The global drift detection provides an overall assessment of whether the test set has significantly drifted from the reference set.
+- The empirical drift flagging allows for identification of individual data points that show substantial drift.
+
+By combining these methodologies, we aim to provide a robust and interpretable approach to detecting and analyzing data drift in our Amazon reviews dataset.
 
 # 2. Creating a virtual enironment
 
